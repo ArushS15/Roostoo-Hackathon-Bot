@@ -1,0 +1,11 @@
+.env
+*.env
+__pycache__/
+*.pyc
+logs/
+state/
+backtest_results/
+.cache_klines/
+*.egg-info/
+venv/
+.venv/

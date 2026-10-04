@@ -1,0 +1,156 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}</style><style>:root{color-scheme:light dark;--md-bg:#fff;--md-text:rgba(0,0,0,.8);--md-muted:rgba(0,0,0,.6);--md-fill:rgba(0,0,0,.04);--md-fill-strong:rgba(0,0,0,.06);--md-rule:rgba(0,0,0,.1);--md-rule-strong:rgba(0,0,0,.16);--md-link:hsl(210 100% 45%)}@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){--md-bg:#0d0d0d;--md-text:rgba(255,255,255,.85);--md-muted:rgba(255,255,255,.6);--md-fill:rgba(255,255,255,.06);--md-fill-strong:rgba(255,255,255,.09);--md-rule:rgba(255,255,255,.14);--md-rule-strong:rgba(255,255,255,.22);--md-link:hsl(210 100% 72%)}}:root[data-theme="dark"]{color-scheme:dark;--md-bg:#0d0d0d;--md-text:rgba(255,255,255,.85);--md-muted:rgba(255,255,255,.6);--md-fill:rgba(255,255,255,.06);--md-fill-strong:rgba(255,255,255,.09);--md-rule:rgba(255,255,255,.14);--md-rule-strong:rgba(255,255,255,.22);--md-link:hsl(210 100% 72%)}:root[data-theme="light"]{color-scheme:light}@media print{:root,:root[data-theme="dark"]{color-scheme:light;--md-bg:#fff;--md-text:rgba(0,0,0,.8);--md-muted:rgba(0,0,0,.6);--md-fill:rgba(0,0,0,.04);--md-fill-strong:rgba(0,0,0,.06);--md-rule:rgba(0,0,0,.1);--md-rule-strong:rgba(0,0,0,.16);--md-link:hsl(210 100% 45%)}}body{background:var(--md-bg);color:var(--md-text);max-width:720px;margin:0 auto;padding:32px;display:flex;flex-direction:column;gap:10px;font:14px/1.55 -apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',sans-serif;overflow-wrap:break-word}body>:first-child{margin-top:0}h1,h2,h3,h4,h5,h6{margin:6px 0 0;line-height:1.25;font-weight:600;text-wrap:balance}h1{font-size:1.35em}h2{font-size:1.15em;color:var(--md-muted)}h3,h4,h5,h6{font-size:1em}p,ul,ol,blockquote,table,pre,hr{margin:0}strong{font-weight:600}a{color:var(--md-link);text-decoration:none}a:hover{text-decoration:underline}ul,ol{display:flex;flex-direction:column;gap:6px;padding-left:22px}ul{list-style:disc}ol{list-style:decimal}:is(li,td,th)>*+:is(p,ul,ol,blockquote){margin-top:6px}blockquote{display:flex;flex-direction:column;gap:10px;border-left:2px solid var(--md-rule);padding-left:10px;color:var(--md-muted)}:not(pre)>code{background:var(--md-fill);padding:1px 3px;border-radius:4px;font:.92em 'SF Mono',ui-monospace,Menlo,Consolas,monospace}a>code{background:none;color:inherit}pre{background:var(--md-fill);padding:10px 12px;border-radius:6px;overflow-x:auto;font:12px/1.5 'SF Mono',ui-monospace,Menlo,Consolas,monospace;margin-block:4px}pre code{background:none;padding:0;font:inherit}table{width:100%;border-collapse:separate;border-spacing:2px;font:inherit}th,td{padding:6px 8px;border-radius:3px;text-align:left;vertical-align:top}th{background:var(--md-fill-strong);font-weight:600}td{background:var(--md-fill)}:is(th,td) :not(pre)>code{background:transparent}hr{border:0;border-top:1px solid var(--md-rule-strong);margin-block:10px}img{max-width:100%;height:auto;border-radius:4px}</style>
+</head><body>
+<h1>Cross-Sectional Momentum Strategy — Roostoo Hackathon Build Spec</h1>
+<p><strong>Purpose of this document:</strong> feed this to an AI coding assistant (Claude Code, Cursor, etc.) as the spec for an autonomous trading bot to build and deploy against the Roostoo mock exchange (<code>https://mock-api.roostoo.com</code>) for the HK vs AU vs IN Quant Trading Hackathon.</p>
+<hr>
+<h2>1. Problem framing</h2>
+<ul>
+<li>Screen 1 (mandatory): every trade must come from the bot's own autonomous loop — no manual API calls, clean and traceable commit history.</li>
+<li>Screen 2: top 20 per region by raw portfolio return advance. The strategy cannot be overly conservative.</li>
+<li>Screen 3: composite score = <strong>0.4 × Sortino + 0.3 × Sharpe + 0.3 × Calmar</strong>. Drawdown control is worth more than raw Sharpe.</li>
+<li>Screen 4: clean, well-structured repo that runs continuously and is compatible with Roostoo.</li>
+<li>Spot only, <strong>1x long and short</strong> permitted (no leverage), $100,000 mock USD portfolio.</li>
+<li>Fees: 0.1% taker (market), 0.05%–0.1% maker/short depending on endpoint (see §5).</li>
+<li>No HFT, market-making, or arbitrage. Bot must trade autonomously, at least 8 active days with a meaningful number of trades per active day.</li>
+</ul>
+<p>Given this, the strategy needs to: (a) generate genuine positive expected return net of fees, (b) actively manage drawdown since it's 60–70% of the risk-adjusted score, and (c) trade often enough to satisfy the activity requirement without over-trading into fee drag.</p>
+<hr>
+<h2>2. Strategy: cross-sectional momentum with a trend filter and volatility-scaled sizing</h2>
+<p><strong>Core idea:</strong> rank all tradable coins by recent risk-adjusted return, go long the strongest, short (or avoid) the weakest, filter everything through a market-regime trend check, and size positions by volatility with a hard drawdown circuit breaker.</p>
+<h3>2.1 Universe</h3>
+<p>Do <strong>not</strong> hardcode a pair list — pull it live from <code>GET /v3/exchangeInfo</code>, filter to pairs where <code>CanTrade == true</code>. From the API docs and examples, Roostoo's mock exchange has historically listed pairs like <code>BTC/USD</code>, <code>ETH/USD</code>, <code>BNB/USD</code>, <code>ETC/USD</code>, <code>EOS/USD</code>, <code>TRX/USD</code>, <code>BAT/USD</code>, <code>LINK/USD</code> and similar large/mid-cap coins — but the live, authoritative list only comes from <code>exchangeInfo</code> at runtime, since it can change. The bot should:</p>
+<ol>
+<li>Call <code>exchangeInfo</code> on startup and on a daily refresh.</li>
+<li>Build the tradable universe dynamically from that response.</li>
+<li>Optionally apply a liquidity filter using <code>CoinTradeValue</code>/<code>UnitTradeValue</code> from <code>/v3/ticker</code>, excluding illiquid pairs where slippage risk is high.</li>
+</ol>
+<p>This makes the bot robust to whatever pairs are actually listed for the competition, and is safer than betting on a specific static list of &quot;equities&quot; (Roostoo only lists crypto/USD pairs, not equities).</p>
+<h3>2.2 Signal — momentum score per pair</h3>
+<p>For each pair <code>i</code> in the universe, on each rebalance:</p>
+<pre><code>ret_k(i)     = % return over lookback k (e.g. k = 6h, 24h, 72h)
+vol(i)       = realized volatility of returns over a matching window (e.g. stdev of hourly returns, 7-day window)
+mom_score(i) = weighted_avg(ret_6h, ret_24h, ret_72h) / vol(i)
+</code></pre>
+<p>Blending three lookbacks smooths out noise from any single window. Dividing by volatility (a simple risk-adjusted momentum score) prevents the ranking from being dominated by the single most volatile coin, which is a common failure mode of naive momentum.</p>
+<h3>2.3 Regime filter (market-wide)</h3>
+<p>Compute a trend filter on BTC (or an equal-weighted basket of the top few coins by trade value) — e.g. price above its 50-period moving average on hourly bars.</p>
+<ul>
+<li><strong>Risk-on regime:</strong> BTC trend is up → allow full long exposure, and shorts only on the very weakest names.</li>
+<li><strong>Risk-off regime:</strong> BTC trend is down → cut gross long exposure (e.g. to 30–50% of normal), and allow more short exposure on the weakest-ranked names.</li>
+</ul>
+<p>This single filter is what should meaningfully help Calmar/Sortino, since crypto pairs are highly correlated and most drawdowns are market-wide, not pair-specific.</p>
+<h3>2.4 Long/short construction</h3>
+<p>Given the momentum scores and the regime filter:</p>
+<ul>
+<li>Rank all pairs by <code>mom_score</code>.</li>
+<li><strong>Long book:</strong> top N pairs (e.g. N = 3–5) with a positive momentum score.</li>
+<li><strong>Short book:</strong> bottom N pairs with a negative momentum score, sized smaller than the long book by default (shorts have capped upside and real tail risk since a short can only be closed at market/limit — see §5), and only activated once you've confirmed the competition allows shorting (see below).</li>
+<li><strong>Cash:</strong> anything not deployed sits in USD. In a risk-off regime, cash allocation should rise.</li>
+</ul>
+<p><strong>Important operational check:</strong> the API docs explicitly list <code>&quot;this competition does not allow short positions&quot;</code> as a possible <code>ErrMsg</code> from <code>/v6/short_open</code>. Before relying on shorting at all:</p>
+<ol>
+<li>Try a tiny test short (e.g. $1–2 collateral) early, read the response.</li>
+<li>If shorting is disabled for this competition, the bot must gracefully fall back to a <strong>long/cash-only</strong> version of the same strategy (skip the short book, put that risk budget into deeper cash allocation during risk-off regimes instead).</li>
+<li>Build this as a config flag (<code>SHORTING_ENABLED</code>) so one bad API response doesn't crash the loop — catch <code>Success: false</code> and branch, don't assume it will always succeed.</li>
+</ol>
+<h3>2.5 Position sizing</h3>
+<ul>
+<li>Target <strong>volatility parity</strong> across positions: weight each position inversely to its recent volatility, then normalize so the book's total gross exposure hits a target (e.g. 80–100% of equity in a risk-on regime, lower in risk-off).</li>
+<li>Cap any single position at, say, 20–25% of equity, so one coin can't dominate the book.</li>
+<li><strong>Circuit breaker:</strong> track running portfolio value and its peak. If drawdown from peak exceeds a threshold (e.g. 8–10%), cut gross exposure by half (or to cash) until the portfolio recovers a set amount from the trough. This directly targets Calmar.</li>
+</ul>
+<h3>2.6 Rebalance cadence</h3>
+<ul>
+<li>Rebalance every 4–12 hours (not tick-by-tick — this is explicitly disallowed as HFT-adjacent and burns fees).</li>
+<li>Use a <strong>hysteresis band</strong>: only replace a held position with a new candidate if the new candidate's momentum score beats the held one by a meaningful margin (e.g. 20%+ relative), to avoid needless churn/fees on marginal rank flips.</li>
+<li>This cadence, combined with $100k capital split across ~5–8 positions, should comfortably clear &quot;enough trades per active day&quot; without approaching HFT territory.</li>
+</ul>
+<hr>
+<h2>3. Why this design fits the scoring function</h2>
+<table>
+<thead>
+<tr>
+<th>Screen</th>
+<th>How this strategy addresses it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rule compliance</td>
+<td>Fully rule-driven, deterministic given market data — no manual intervention, clean logs of every decision and API call</td>
+</tr>
+<tr>
+<td>Portfolio return</td>
+<td>Momentum + being invested in top-ranked names by default keeps the strategy return-seeking, not just defensive</td>
+</tr>
+<tr>
+<td>Sortino / Sharpe / Calmar</td>
+<td>Vol-scaled sizing, regime filter, and drawdown circuit breaker are all specifically aimed at limiting downside vol and max drawdown</td>
+</tr>
+<tr>
+<td>Code review</td>
+<td>Clean separation of signal / sizing / execution / risk modules (see §6) makes the strategy easy to explain and audit</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2>4. Backtesting plan</h2>
+<ol>
+<li>Pull historical OHLCV for the same pairs from a public source (the hackathon's Data Sources Pack, or a public exchange API like Binance for the same symbols, since Roostoo's own history is limited to what you log going forward).</li>
+<li>Build a vectorized backtester (pandas) that:
+<ul>
+<li>Computes signals with no lookahead (signal on bar <code>t</code>, trade executes on bar <code>t+1</code>).</li>
+<li>Applies fees on every simulated trade (0.1% market / lower for resting limit orders) and slippage.</li>
+<li>Enforces the same position caps, regime filter, and drawdown breaker as the live bot.</li>
+</ul>
+</li>
+<li>Report the same three metrics the judges use — Sharpe, Sortino, Calmar — plus max drawdown and turnover, so you can sanity-check before deploying.</li>
+<li>Stress-test: double the assumed fees, and re-run with a couple of different lookback windows to confirm the strategy isn't overfit to one parameter set.</li>
+</ol>
+<hr>
+<h2>5. Roostoo API mechanics the bot must respect</h2>
+<ul>
+<li><strong>Auth:</strong> <code>RCL_TopLevelCheck</code> endpoints need <code>RST-API-KEY</code> + <code>MSG-SIGNATURE</code> (HMAC-SHA256 of the sorted, <code>&amp;</code>-joined param string, keyed by your secret) in the headers, plus a millisecond <code>timestamp</code> within 60s of server time.</li>
+<li><strong>Always check <code>Success</code> in the response body</strong> — failed requests still return HTTP 200.</li>
+<li><strong>Long/flat trading:</strong> <code>POST /v3/place_order</code> (<code>MARKET</code> or <code>LIMIT</code>, <code>BUY</code>/<code>SELL</code>). Respect each pair's <code>PricePrecision</code>, <code>AmountPrecision</code>, and <code>MiniOrder</code> from <code>exchangeInfo</code>, or orders are rejected.</li>
+<li><strong>Shorting:</strong> <code>POST /v6/short_open</code> (sized by <code>collateral</code>, not quantity) and <code>POST /v6/short_close</code> (by <code>close_qty</code> or <code>close_pct</code>). Check <code>/v6/short_positions</code> for live PnL. Handle the <code>&quot;this competition does not allow short positions&quot;</code> error as described in §2.4.</li>
+<li><strong>Order tracking:</strong> use <code>/v3/pending_count</code> and <code>/v3/query_order</code> to reconcile intended vs. actual state — don't assume an order filled just because you sent it.</li>
+<li><strong>Rate limits:</strong> &quot;excessive server requests&quot; cause failed responses — poll on a fixed schedule (e.g. once per rebalance cycle plus periodic balance/position checks), not in a tight loop.</li>
+</ul>
+<hr>
+<h2>6. Suggested repo / module structure</h2>
+<pre><code>/bot
+  config.py        # universe refresh interval, lookbacks, caps, drawdown thresholds, SHORTING_ENABLED
+  roostoo_client.py# thin wrapper: signed requests, retries, Success-flag checking
+  data.py          # ticker polling, local price history buffer, persistence
+  signals.py       # momentum score, regime filter
+  risk.py          # vol-scaled sizing, position caps, drawdown circuit breaker
+  execution.py      # translate target weights -&gt; orders, respect precision/MiniOrder, place/cancel
+  state.py         # persist positions/equity curve/peak so restarts don&#39;t lose state
+  main.py          # scheduling loop (e.g. APScheduler or a simple sleep loop under systemd)
+  backtest.py      # offline backtester reusing signals.py and risk.py
+logs/              # structured logs of every signal, decision, and order response
+README.md          # strategy explanation, how to run, how to deploy on the AWS EC2 box
+</code></pre>
+<p>Keep <code>signals.py</code> and <code>risk.py</code> pure functions with no API calls — this is what lets you reuse them in <code>backtest.py</code> and makes the strategy logic auditable for Screen 4.</p>
+<hr>
+<h2>7. What to hand to the coding AI, concretely</h2>
+<p>When you prompt an AI to build this, give it:</p>
+<ol>
+<li>This document.</li>
+<li>The Roostoo API README (HMAC signing example, all endpoint schemas).</li>
+<li>A clear instruction: &quot;Build the module structure in §6. Start with <code>roostoo_client.py</code> and a read-only smoke test (<code>serverTime</code>, <code>exchangeInfo</code>, <code>ticker</code>, <code>balance</code>) before writing any order-placing code. Persist state to disk. Log every request/response. Every trading decision must originate from the scheduled loop in <code>main.py</code> — no manual/one-off order calls anywhere in the code.&quot;</li>
+<li>Ask it to build the backtester in parallel so you can validate the signal before running it live with real (mock) capital.</li>
+</ol>
+<hr>
+<h2>8. Immediate next steps</h2>
+<ol>
+<li>Confirm team registration is done via the Typeform (not Luma) before Sep 29, 11:59pm GMT+8.</li>
+<li>Get API keys, run the read-only smoke test.</li>
+<li>Query <code>exchangeInfo</code> to get the actual live universe.</li>
+<li>Send a tiny test short to confirm whether shorting is enabled for this competition; set <code>SHORTING_ENABLED</code> accordingly.</li>
+<li>Build and validate the backtester on historical data before wiring up live order placement.</li>
+<li>Deploy to the AWS EC2 sub-account, start conservative, then let it run through Oct 4–17 with tracked, incremental commits.</li>
+</ol>
+
+</body></html>
