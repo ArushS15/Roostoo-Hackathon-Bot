@@ -10,24 +10,35 @@ import os
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_bot_dir)
 
-# Load .env from bot dir, parent dir, or current dir
+# Load .env (or .env.example) from bot dir, parent dir, or current dir
+_env_files = [
+    os.path.join(_bot_dir, ".env"),
+    os.path.join(_parent_dir, ".env"),
+    ".env",
+    os.path.join(_bot_dir, ".env.example"),
+    os.path.join(_parent_dir, ".env.example"),
+    ".env.example",
+]
+
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(_bot_dir, ".env"))
-    load_dotenv(os.path.join(_parent_dir, ".env"))
-    load_dotenv()
+    for f in _env_files:
+        if os.path.exists(f):
+            load_dotenv(f)
 except (ImportError, AttributeError):
-    # Fallback: manual parser if python-dotenv is missing or shadowed by legacy 'dotenv'
-    for env_path in [os.path.join(_bot_dir, ".env"), os.path.join(_parent_dir, ".env"), ".env"]:
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        k, v = line.split("=", 1)
-                        k, v = k.strip(), v.strip().strip("'\"")
-                        if k not in os.environ:
-                            os.environ[k] = v
+    pass
+
+# Manual parser fallback ensures variables are loaded even if python-dotenv is broken or missing
+for env_path in _env_files:
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip("'\"")
+                    if not os.environ.get(k):
+                        os.environ[k] = v
 
 # ─── API credentials ────────────────────────────────────────────────────────
 RST_API_KEY = os.getenv("RST_API_KEY", "")
