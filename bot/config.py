@@ -6,15 +6,28 @@ Optimized by parameter sweep (N=3, exit=6, 90/50 → +26.10%, composite 10.7).
 """
 
 import os
-from dotenv import load_dotenv
 
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_bot_dir)
 
 # Load .env from bot dir, parent dir, or current dir
-load_dotenv(os.path.join(_bot_dir, ".env"))
-load_dotenv(os.path.join(_parent_dir, ".env"))
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(_bot_dir, ".env"))
+    load_dotenv(os.path.join(_parent_dir, ".env"))
+    load_dotenv()
+except (ImportError, AttributeError):
+    # Fallback: manual parser if python-dotenv is missing or shadowed by legacy 'dotenv'
+    for env_path in [os.path.join(_bot_dir, ".env"), os.path.join(_parent_dir, ".env"), ".env"]:
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip().strip("'\"")
+                        if k not in os.environ:
+                            os.environ[k] = v
 
 # ─── API credentials ────────────────────────────────────────────────────────
 RST_API_KEY = os.getenv("RST_API_KEY", "")
